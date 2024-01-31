@@ -6,14 +6,14 @@ import math
 
 from pathlib import Path
 from scipy.spatial.transform import Rotation as R
-from collections import defaultdict
 
 
 def get_intermediate_transform(initial_pose, target_pose, coef):
     dxi = mrob.geometry.SE3(target_pose @ np.linalg.inv(initial_pose)).Ln()
-    return mrob.geometry.SE3(coef * dxi).T() @ initial_pose
+    return np.asarray(mrob.geometry.SE3(coef * dxi).T() @ initial_pose)
 
-def undistort_segment(pcd, theta_min, theta_max, color, transform):
+
+def cut_segment(pcd, theta_min, theta_max, coef):
     # Convert the point cloud points to a numpy array
     points = np.asarray(pcd.points)
     thetas = np.asarray([math.atan2(p[1],p[0]) for p in points])
@@ -24,25 +24,24 @@ def undistort_segment(pcd, theta_min, theta_max, color, transform):
 
     new_pcd = o3d.geometry.PointCloud()
     if trues > 0:
-        new_colors = np.full((trues, 3), color)
+        new_colors = np.full((trues, 3), [0., 0., coef])
         new_points = points[mask_roi]
 
         new_pcd.points = o3d.utility.Vector3dVector(new_points)
         new_pcd.colors = o3d.utility.Vector3dVector(new_colors)
 
-    return new_pcd.transform(transform)
+    return new_pcd
+
 
 def undistort_cloud(cloud, start_angle, N_segments, initial_pose, target_pose):
     N_segments += 1 # starting separations from 0
     undistort_result = []
     coefs = np.linspace(0, 1, N_segments)
     sectors = np.linspace(start_angle, start_angle + 2 * np.pi, N_segments)
-    color = [0.,0.,0.]
 
     for i in range(1, N_segments):
-        transform = get_intermediate_transform(initial_pose, target_pose, coefs[i])
-        color[2] = coefs[i]
-        undistort_result.append(undistort_segment(cloud, start_angle, sectors[i], color, np.asarray(transform)))
+        transform_matrix = get_intermediate_transform(initial_pose, target_pose, coefs[i])
+        undistort_result.append(cut_segment(cloud, start_angle, sectors[i], coefs[i]).transform(transform_matrix))
         start_angle = sectors[i]
     return undistort_result
 
