@@ -10,7 +10,7 @@ from scipy.spatial.transform import Rotation as R
 
 def get_intermediate_transform(initial_pose, target_pose, coef):
     dxi = mrob.geometry.SE3(target_pose @ np.linalg.inv(initial_pose)).Ln()
-    return np.asarray(mrob.geometry.SE3(coef * dxi).T() @ initial_pose)
+    return np.linalg.inv(mrob.geometry.SE3(coef * dxi).T() @ initial_pose)
 
 
 def cut_segment(pcd, theta_min, theta_max, coef):
@@ -37,11 +37,13 @@ def undistort_cloud(cloud, start_angle, N_segments, initial_pose, target_pose):
     N_segments += 1 # starting separations from 0
     undistort_result = []
     coefs = np.linspace(0, 1, N_segments)
-    sectors = np.linspace(start_angle, start_angle + 2 * np.pi, N_segments)
+    sectors = np.linspace(start_angle, start_angle - 2 * np.pi, N_segments)
+
+    coefs = np.roll(coefs, -len(coefs)//2 )
 
     for i in range(1, N_segments):
-        transform_matrix = get_intermediate_transform(initial_pose, target_pose, coefs[i])
-        undistort_result.append(cut_segment(cloud, start_angle, sectors[i], coefs[i]).transform(transform_matrix))
+        transform_matrix = get_intermediate_transform(initial_pose, target_pose, coefs[i-1])
+        undistort_result.append(cut_segment(cloud, sectors[i], start_angle,  coefs[i-1]).transform(transform_matrix))
         start_angle = sectors[i]
     return undistort_result
 
@@ -63,8 +65,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--N_segments",
         type=int,
-        default=16,
-        help="number of segments to split pointcloud into",
+        default=4,
+        help="number of segments to split pointcloud into, must be an even number",
     )
 
 
@@ -82,12 +84,12 @@ if __name__ == "__main__":
     
     pose_start = np.eye(4, 4)
     reg_p2p = o3d.pipelines.registration.registration_icp(
-        pcd_fin, pcd_start, 0.1, pose_start,
+        pcd_start, pcd_fin, 0.1, pose_start,
         o3d.pipelines.registration.TransformationEstimationPointToPoint(),  
         o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=2000),
     )
 
-    start_angle = -np.pi
+    start_angle = np.pi
     undistort_result = undistort_cloud(pcd_undistort, start_angle, args.N_segments, pose_start, reg_p2p.transformation)
 
     o3d.visualization.draw_geometries(undistort_result)
