@@ -8,11 +8,12 @@ from pathlib import Path
 from scipy.spatial.transform import Rotation as R
 
 
-def get_intermediate_transform(initial_pose, target_pose, coef):
+def get_intermediate_transform(initial_pose: np.ndarray, target_pose: np.ndarray, coef: float) -> np.ndarray:
     dxi = mrob.geometry.SE3(target_pose @ np.linalg.inv(initial_pose)).Ln()
     return mrob.geometry.SE3(coef * dxi).T() @ initial_pose
 
-def cut_segment(pcd, theta_min, theta_max, coef):
+
+def cut_segment(pcd: o3d.geometry.PointCloud, theta_min: float, theta_max: float, coef: float) -> o3d.geometry.PointCloud:
     # Convert the point cloud points to a numpy array
     points = np.asarray(pcd.points)
     thetas = np.asarray([math.atan2(p[1],p[0]) for p in points])
@@ -32,7 +33,11 @@ def cut_segment(pcd, theta_min, theta_max, coef):
     return new_pcd
 
 
-def undistort_cloud(pcd_initial, pcd_target, initial_pose, target_pose, N_segments):
+def undistort_cloud(pcd_initial: o3d.geometry.PointCloud, pcd_target: o3d.geometry.PointCloud, initial_pose: np.ndarray, target_pose: np.ndarray, N_segments: int) -> o3d.geometry.PointCloud:
+    # preventing objects from mutating
+    pcd_initial = o3d.geometry.PointCloud(pcd_initial)
+    pcd_target =  o3d.geometry.PointCloud(pcd_target)
+
     N_segments += 1 # starting separations from 0
     undistort_result = []
     coefs = np.linspace(0, 1, N_segments)
@@ -40,8 +45,8 @@ def undistort_cloud(pcd_initial, pcd_target, initial_pose, target_pose, N_segmen
     sectors = np.linspace(start_angle, start_angle - 2 * np.pi, N_segments)
 
     # applying poses to pcd
-    pcd_initial.transform(pose_start)
-    pcd_target.transform(pose_fin)
+    pcd_initial.transform(initial_pose)
+    pcd_target.transform(target_pose)
     
     # calculating transform between two poses
     initial_transform = np.eye(4, 4)
@@ -53,7 +58,7 @@ def undistort_cloud(pcd_initial, pcd_target, initial_pose, target_pose, N_segmen
 
     # returning initial pcd to it's original state
     # this is done for correct sector cutting
-    pcd_initial.transform(np.linalg.inv(pose_start))
+    pcd_initial.transform(np.linalg.inv(initial_pose))
 
 
     coefs = np.roll(coefs, -len(coefs)//2 ) # rolled due to lidar ray start
@@ -62,50 +67,60 @@ def undistort_cloud(pcd_initial, pcd_target, initial_pose, target_pose, N_segmen
         segment = cut_segment(pcd_initial, sectors[i], start_angle,  coefs[i-1])
 
         # getting composite transform matrix: initial -> pose --(gradual)--> target_pcd pose
-        transform_matrix = get_intermediate_transform(initial_pose, reg_p2p.transformation@pose_start, coefs[i-1])
+        transform_matrix = get_intermediate_transform(initial_pose, reg_p2p.transformation@initial_pose, coefs[i-1])
 
         # applying transform to the segment
         undistort_result.append(segment.transform(transform_matrix))
         
         start_angle = sectors[i]
 
-    return undistort_result
+    # combining segments in one pcd
+    return_pcd = o3d.geometry.PointCloud()
+    return_pcd_points = return_pcd.points
+    return_pcd_colors = return_pcd.colors
 
-def read_pose(filename):
+    for segment_pcd in undistort_result:
+        return_pcd_points.extend(segment_pcd.points)
+        return_pcd_colors.extend(segment_pcd.colors)
+
+    return_pcd.points =  return_pcd_points  
+    return_pcd.colors = return_pcd_colors
+
+    return return_pcd
+
+
+def read_pose(filename: str):
     matrix = np.eye(4)
-    try:
-        f = open(filename, newline='')
-    except OSError:
-        print(f"Could not open/read file: {filename}. Default pose returned", filename)
-    with f:
+    with open(filename, newline='') as f:
         lines = f.readlines()
         matrix = np.asarray([[round(float(el), 4) for el in row.split(" ")[0:7]] for row in lines])
         
     return matrix
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--pcd_start",
+        "--pcd_initial",
         type=str,
         default='/home/polosatik/pointcloud_undistort/hilti_14/clouds/0.pcd',
         help="pcd of initial pose",
     )
     parser.add_argument(
-        "--pcd_final",
+        "--pcd_target",
         type=str,
         default='/home/polosatik/pointcloud_undistort/hilti_14/clouds/15.pcd',
         help="pcd of final pose",
     )
 
     parser.add_argument(
-        "--pose_start",
+        "--initial_pose",
         type=str,
         default='/home/polosatik/pointcloud_undistort/hilti_14/poses/0.txt',
         help="pose of initial pose",
     )
     parser.add_argument(
-        "--pose_final",
+        "--target_pose",
         type=str,
         default='/home/polosatik/pointcloud_undistort/hilti_14/poses/15.txt',
         help="pose of final pose",
@@ -121,19 +136,19 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    pcd_start = o3d.io.read_point_cloud(str(Path(args.pcd_start)))
-    pcd_start = pcd_start.paint_uniform_color([1.0, 0.0, 0.0])
+    pcd_initial = o3d.io.read_point_cloud(str(Path(args.pcd_initial)))
+    pcd_initial = pcd_initial.paint_uniform_color([1.0, 0.0, 0.0])
 
-    pcd_fin = o3d.io.read_point_cloud(str(Path(args.pcd_final)))
-    pcd_fin = pcd_fin.paint_uniform_color([0.0, 1.0, 0.0])
+    pcd_target = o3d.io.read_point_cloud(str(Path(args.pcd_target)))
+    pcd_target = pcd_target.paint_uniform_color([0.0, 1.0, 0.0])
 
-    pcd_undistort = o3d.io.read_point_cloud(str(Path(args.pcd_start)))
+    pcd_undistort = o3d.io.read_point_cloud(str(Path(args.pcd_initial)))
 
-    pose_start = read_pose(Path(args.pose_start))
-    pose_fin = read_pose(Path(args.pose_final))
+    initial_pose = read_pose(Path(args.initial_pose))
+    target_pose = read_pose(Path(args.target_pose))
 
-    undistort_pcd = undistort_cloud(o3d.geometry.PointCloud(pcd_start), o3d.geometry.PointCloud(pcd_fin), pose_start, pose_fin, args.N_segments)
+    undistort_pcd = undistort_cloud(pcd_initial, pcd_target, initial_pose, target_pose, args.N_segments)
     
-    pcd_start.transform(pose_start)
-    pcd_fin.transform(pose_fin)
-    o3d.visualization.draw_geometries([pcd_start,  pcd_fin] + undistort_pcd)
+    pcd_initial.transform(initial_pose)
+    pcd_target.transform(target_pose)
+    o3d.visualization.draw_geometries([pcd_initial,  pcd_target, undistort_pcd])
