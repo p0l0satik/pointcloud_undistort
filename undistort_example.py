@@ -103,26 +103,26 @@ if __name__ == "__main__":
     parser.add_argument(
         "--pcd_initial",
         type=str,
-        default='/home/polosatik/pointcloud_undistort/hilti_14/clouds/0.pcd',
+        default='dataset/hilti_14/clouds/0.pcd',
         help="pcd of initial pose",
     )
     parser.add_argument(
         "--pcd_target",
         type=str,
-        default='/home/polosatik/pointcloud_undistort/hilti_14/clouds/15.pcd',
+        default='dataset/hilti_14/clouds/15.pcd',
         help="pcd of final pose",
     )
 
     parser.add_argument(
         "--initial_pose",
         type=str,
-        default='/home/polosatik/pointcloud_undistort/hilti_14/poses/0.txt',
+        default='dataset/hilti_14/poses/0.txt',
         help="pose of initial pose",
     )
     parser.add_argument(
         "--target_pose",
         type=str,
-        default='/home/polosatik/pointcloud_undistort/hilti_14/poses/15.txt',
+        default='dataset/hilti_14/poses/15.txt',
         help="pose of final pose",
     )
 
